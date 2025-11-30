@@ -13,13 +13,10 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/api/gateway")
+@RequiredArgsConstructor
 public class RegistrationController {
 
     private final RegistrationService registrationService;
-
-    public RegistrationController(RegistrationService registrationService) {
-        this.registrationService = registrationService;
-    }
 
     @PostMapping("/register")
     public Mono<ResponseEntity<String>> register(@RequestBody CreateRegistrationDto registration) {

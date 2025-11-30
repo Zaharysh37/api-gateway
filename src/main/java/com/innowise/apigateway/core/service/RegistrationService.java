@@ -3,6 +3,7 @@ package com.innowise.apigateway.core.service;
 import com.innowise.apigateway.api.dto.CreateAuthServiceDto;
 import com.innowise.apigateway.api.dto.CreateRegistrationDto;
 import com.innowise.apigateway.api.dto.CreateUserServiceDto;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,15 +14,11 @@ import reactor.core.publisher.Mono;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class RegistrationService {
 
     private final WebClient authWebClient;
     private final WebClient userWebClient;
-
-    public RegistrationService(WebClient authWebClient, WebClient userWebClient) {
-        this.authWebClient = authWebClient;
-        this.userWebClient = userWebClient;
-    }
 
     @Value("${internal.api-key}")
     private String internalKey;

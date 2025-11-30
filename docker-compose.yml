@@ -44,19 +44,20 @@ services:
       - "${AUTH_APP_PORT}:${AUTH_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      AUTH_APP_PORT: ${AUTH_APP_PORT}
-      AUTH_DB_NAME: ${AUTH_DB_NAME}
-      SPRING_AUTH_DATASOURCE_USERNAME: ${SPRING_AUTH_DATASOURCE_USERNAME}
-      SPRING_AUTH_DATASOURCE_PASSWORD: ${SPRING_AUTH_DATASOURCE_PASSWORD}
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
+      APP_PORT: ${AUTH_APP_PORT}
+      DB_NAME: ${AUTH_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_AUTH_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_AUTH_DATASOURCE_PASSWORD}
     depends_on:
       postgres-auth-db:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${AUTH_APP_PORT}/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: [ "CMD-SHELL", "curl -f http://localhost:${AUTH_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   userservice-app:
     container_name: user-service-app
@@ -64,15 +65,16 @@ services:
       context: ./../userservice
       dockerfile: Dockerfile
     ports:
-      - "${APP_PORT}:${APP_PORT}"
+      - "${USER_APP_PORT}:${USER_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      APP_PORT: ${APP_PORT}
-      DB_NAME: ${DB_NAME}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
-      REDIS_HOST: redis-cache
-      REDIS_PORT: 6379
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      APP_PORT: ${USER_APP_PORT}
+      DB_NAME: ${USER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_USER_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_USER_DATASOURCE_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
     depends_on:
       postgres-user-db:
         condition: service_started
@@ -81,11 +83,11 @@ services:
       authservice-app:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${USER_APP_PORT}/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: [ "CMD-SHELL", "curl -f http://localhost:${USER_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   orderservice-app:
     container_name: order-service-app
@@ -96,10 +98,12 @@ services:
       - "${ORDER_APP_PORT}:${ORDER_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      ORDER_APP_PORT: ${ORDER_APP_PORT}
-      ORDER_DB_NAME: ${ORDER_DB_NAME}
-      SPRING_ORDER_DATASOURCE_USERNAME: ${SPRING_ORDER_DATASOURCE_USERNAME}
-      SPRING_ORDER_DATASOURCE_PASSWORD: ${SPRING_ORDER_DATASOURCE_PASSWORD}
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      USER_APP_PORT: ${USER_APP_PORT}
+      APP_PORT: ${ORDER_APP_PORT}
+      DB_NAME: ${ORDER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_ORDER_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_ORDER_DATASOURCE_PASSWORD}
     depends_on:
       postgres-order-db:
         condition: service_started
@@ -108,11 +112,11 @@ services:
       userservice-app:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${ORDER_APP_PORT}/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: [ "CMD-SHELL", "curl -f http://localhost:${ORDER_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   apigateway-app:
     container_name: api-gateway
@@ -120,13 +124,15 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8084:8084"
+      - "${GATEWAY_APP_PORT}:${GATEWAY_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      AUTH_SERVICE_URL: http://authservice-app:${AUTH_APP_PORT}
-      USER_SERVICE_URL: http://userservice-app:${USER_APP_PORT}
+      APP_PORT: ${GATEWAY_APP_PORT}
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      USER_APP_PORT: ${USER_APP_PORT}
+      ORDER_APP_PORT: ${ORDER_APP_PORT}
       INTERNAL_API_KEY: ${ROLLBACK_KEY}
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://authservice-app:${AUTH_APP_PORT}/api/auth/.well-known/jwks.json
     depends_on:
       authservice-app:
         condition: service_healthy
@@ -135,8 +141,8 @@ services:
       orderservice-app:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${GATEWAY_APP_PORT}/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: [ "CMD-SHELL", "curl -f http://localhost:${GATEWAY_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
