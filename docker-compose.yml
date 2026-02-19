@@ -35,7 +35,43 @@ services:
     ports:
       - "${REDIS_PORT}:6379"
 
+  mongo-db:
+    image: mongo:6.0
+    container_name: payment_mongo_db
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${PAYMENT_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${PAYMENT_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${PAYMENT_DB_NAME}
+    ports:
+      - "${MONGO_PORT}:27017"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: payment_zookeeper
+    ports:
+      - "${ZOOKEEPER_PORT}:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: payment_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA_PORT}:${KAFKA_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://${INTERNAL_BOOTSTRAP_SERVER},EXTERNAL://${EXTERNAL_BOOTSTRAP_SERVER}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
   authservice-app:
+    image: authservice-app:latest
     container_name: auth-service-app
     build:
       context: ./../authservice
@@ -44,11 +80,13 @@ services:
       - "${AUTH_APP_PORT}:${AUTH_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      ROLLBACK_KEY: ${ROLLBACK_KEY}
       APP_PORT: ${AUTH_APP_PORT}
-      DB_NAME: ${AUTH_DB_NAME}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_AUTH_DATASOURCE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_AUTH_DATASOURCE_PASSWORD}
+      USER_APP_PORT: ${USER_APP_PORT}
+      D_DB_HOST_PORT: 5432
+      D_DB_NAME: ${AUTH_DB_NAME}
+      D_DB_USER: ${AUTH_DB_USER}
+      D_DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
     depends_on:
       postgres-auth-db:
         condition: service_started
@@ -60,6 +98,7 @@ services:
       start_period: 60s
 
   userservice-app:
+    image: userservice-app:latest
     container_name: user-service-app
     build:
       context: ./../userservice
@@ -68,13 +107,15 @@ services:
       - "${USER_APP_PORT}:${USER_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      AUTH_APP_PORT: ${AUTH_APP_PORT}
       APP_PORT: ${USER_APP_PORT}
-      DB_NAME: ${USER_DB_NAME}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_USER_DATASOURCE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_USER_DATASOURCE_PASSWORD}
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      D_DB_NAME: ${USER_DB_NAME}
+      D_DB_HOST_PORT: 5432
+      D_DB_USER: ${USER_DB_USER}
+      D_DB_PASSWORD: ${USER_DB_PASSWORD}
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
     depends_on:
       postgres-user-db:
         condition: service_started
@@ -90,6 +131,7 @@ services:
       start_period: 60s
 
   orderservice-app:
+    image: orderservice-app:latest
     container_name: order-service-app
     build:
       context: ./../orderservice
@@ -101,14 +143,19 @@ services:
       AUTH_APP_PORT: ${AUTH_APP_PORT}
       USER_APP_PORT: ${USER_APP_PORT}
       APP_PORT: ${ORDER_APP_PORT}
-      DB_NAME: ${ORDER_DB_NAME}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_ORDER_DATASOURCE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_ORDER_DATASOURCE_PASSWORD}
+      D_DB_NAME: ${ORDER_DB_NAME}
+      D_DB_HOST_PORT: 5432
+      D_DB_USER: ${ORDER_DB_USER}
+      D_DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      BOOTSTRAP_SERVER: ${INTERNAL_BOOTSTRAP_SERVER}
+      ORDER_PRODUCER_TOPIC: ${ORDER_PRODUCER_TOPIC}
+      ORDER_CONSUMER_TOPIC: ${PAYMENT_PRODUCER_TOPIC}
+      GROUP_ID: ${ORDER_GROUP_ID}
     depends_on:
       postgres-order-db:
         condition: service_started
-      authservice-app:
-        condition: service_healthy
+      kafka:
+        condition: service_started
       userservice-app:
         condition: service_healthy
     healthcheck:
@@ -118,7 +165,42 @@ services:
       retries: 3
       start_period: 60s
 
+  paymentservice-app:
+    image: paymentservice-app:latest
+    container_name: payment-service-app
+    build:
+      context: ./../paymentservice
+      dockerfile: Dockerfile
+    ports:
+      - "${PAYMENT_APP_PORT}:${PAYMENT_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      APP_PORT: ${PAYMENT_APP_PORT}
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      MONGO_HOST: ${MONGO_HOST}
+      MONGO_PORT: ${MONGO_PORT}
+      DB_NAME: ${PAYMENT_DB_NAME}
+      ROOT_USERNAME: ${PAYMENT_ROOT_USERNAME}
+      ROOT_PASSWORD: ${PAYMENT_ROOT_PASSWORD}
+      BOOTSTRAP_SERVER: ${INTERNAL_BOOTSTRAP_SERVER}
+      PAYMENT_PRODUCER_TOPIC: ${PAYMENT_PRODUCER_TOPIC}
+      PAYMENT_CONSUMER_TOPIC: ${ORDER_PRODUCER_TOPIC}
+      GROUP_ID: ${PAYMENT_GROUP_ID}
+      RANDOM_API: ${RANDOM_URI}
+    depends_on:
+      mongo-db:
+        condition: service_started
+      orderservice-app:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${PAYMENT_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   apigateway-app:
+    image: apigateway-app:latest
     container_name: api-gateway
     build:
       context: .
@@ -127,12 +209,12 @@ services:
       - "${GATEWAY_APP_PORT}:${GATEWAY_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      APP_PORT: ${GATEWAY_APP_PORT}
+      GATEWAY_APP_PORT: ${GATEWAY_APP_PORT}
       ROLLBACK_KEY: ${ROLLBACK_KEY}
       AUTH_APP_PORT: ${AUTH_APP_PORT}
       USER_APP_PORT: ${USER_APP_PORT}
       ORDER_APP_PORT: ${ORDER_APP_PORT}
-      INTERNAL_API_KEY: ${ROLLBACK_KEY}
+      PAYMENT_APP_PORT: ${PAYMENT_APP_PORT}
     depends_on:
       authservice-app:
         condition: service_healthy
@@ -140,9 +222,66 @@ services:
         condition: service_healthy
       orderservice-app:
         condition: service_healthy
+      paymentservice-app:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:${GATEWAY_APP_PORT}/actuator/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - default
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    networks:
+      - default
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    container_name: tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "3200:3200" # Tempo internal
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP (используется Spring Boot)
+    networks:
+      - default
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    volumes:
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
