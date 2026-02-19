@@ -1,0 +1,148 @@
+services:
+  postgres-user-db:
+    image: postgres:15-alpine
+    container_name: user-service-db
+    environment:
+      POSTGRES_DB: ${USER_DB_NAME}
+      POSTGRES_USER: ${USER_DB_USER}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD}
+    ports:
+      - "${USER_DB_HOST_PORT}:5432"
+
+  postgres-auth-db:
+    image: postgres:15-alpine
+    container_name: auth-service-db
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME}
+      POSTGRES_USER: ${AUTH_DB_USER}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD}
+    ports:
+      - "${AUTH_DB_HOST_PORT}:5432"
+
+  postgres-order-db:
+    image: postgres:15-alpine
+    container_name: order-service-db
+    environment:
+      POSTGRES_DB: ${ORDER_DB_NAME}
+      POSTGRES_USER: ${ORDER_DB_USER}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
+    ports:
+      - "${ORDER_DB_HOST_PORT}:5432"
+
+  redis-cache:
+    image: redis:7.2-alpine
+    container_name: user-service-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+
+  authservice-app:
+    container_name: auth-service-app
+    build:
+      context: ./../authservice
+      dockerfile: Dockerfile
+    ports:
+      - "${AUTH_APP_PORT}:${AUTH_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
+      APP_PORT: ${AUTH_APP_PORT}
+      DB_NAME: ${AUTH_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_AUTH_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_AUTH_DATASOURCE_PASSWORD}
+    depends_on:
+      postgres-auth-db:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${AUTH_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  userservice-app:
+    container_name: user-service-app
+    build:
+      context: ./../userservice
+      dockerfile: Dockerfile
+    ports:
+      - "${USER_APP_PORT}:${USER_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      APP_PORT: ${USER_APP_PORT}
+      DB_NAME: ${USER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_USER_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_USER_DATASOURCE_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+    depends_on:
+      postgres-user-db:
+        condition: service_started
+      redis-cache:
+        condition: service_started
+      authservice-app:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${USER_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  orderservice-app:
+    container_name: order-service-app
+    build:
+      context: ./../orderservice
+      dockerfile: Dockerfile
+    ports:
+      - "${ORDER_APP_PORT}:${ORDER_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      USER_APP_PORT: ${USER_APP_PORT}
+      APP_PORT: ${ORDER_APP_PORT}
+      DB_NAME: ${ORDER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_ORDER_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_ORDER_DATASOURCE_PASSWORD}
+    depends_on:
+      postgres-order-db:
+        condition: service_started
+      authservice-app:
+        condition: service_healthy
+      userservice-app:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${ORDER_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  apigateway-app:
+    container_name: api-gateway
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${GATEWAY_APP_PORT}:${GATEWAY_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      APP_PORT: ${GATEWAY_APP_PORT}
+      ROLLBACK_KEY: ${ROLLBACK_KEY}
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      USER_APP_PORT: ${USER_APP_PORT}
+      ORDER_APP_PORT: ${ORDER_APP_PORT}
+      INTERNAL_API_KEY: ${ROLLBACK_KEY}
+    depends_on:
+      authservice-app:
+        condition: service_healthy
+      userservice-app:
+        condition: service_healthy
+      orderservice-app:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${GATEWAY_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
