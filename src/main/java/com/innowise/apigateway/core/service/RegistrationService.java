@@ -32,6 +32,7 @@ public class RegistrationService {
 
         return authWebClient.post()
             .uri("/api/auth/register")
+            .header("x-internal-key", internalKey)
             .bodyValue(authRequest)
             .retrieve()
             .bodyToMono(UUID.class)
@@ -59,6 +60,7 @@ public class RegistrationService {
 
         return userWebClient.post()
             .uri("/api/users/registration")
+            .header("x-internal-key", internalKey)
             .bodyValue(userRequest)
             .retrieve()
             .bodyToMono(Void.class);
